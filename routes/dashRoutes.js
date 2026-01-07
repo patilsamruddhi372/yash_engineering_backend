@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
 
-const auth = require("../middlewares/authMiddleware") 
-  || require("../middleware/authMiddleware") 
+const auth = require("../Middlewares/authMiddleware") 
+  || require("../Middleware/authMiddleware") 
 //   || require("../Middlewares/authMiddleware");
 
 console.log("Loaded auth middleware:", auth);
