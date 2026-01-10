@@ -239,6 +239,7 @@ app.get("/", (req, res) => {
       products: "/api/products",
       services: "/api/services",
       gallery: "/api/gallery",
+      categories: "/api/categories", // Added for category management
       clients: "/api/clients",
       enquiries: "/api/enquiries",
       brochure: "/api/brochure",
@@ -578,6 +579,222 @@ function createBrochureRouter() {
 }
 
 // ===========================
+// Create Category Routes (Fallback)
+// ===========================
+
+function createCategoryRouter() {
+  const router = express.Router();
+  
+  // Get or create Category model
+  let Category;
+  try {
+    Category = mongoose.model("Category");
+  } catch (e) {
+    const categorySchema = new mongoose.Schema(
+      {
+        name: {
+          type: String,
+          required: [true, 'Category name is required'],
+          unique: true,
+          trim: true
+        }
+      },
+      { timestamps: true }
+    );
+    
+    Category = mongoose.model("Category", categorySchema);
+    console.log("📋 Created Category model inline");
+  }
+  
+  // Get Gallery model for category reference updates
+  let Gallery;
+  try {
+    Gallery = mongoose.model("Gallery");
+  } catch (e) {
+    // If Gallery model doesn't exist, create it with basic schema
+    const gallerySchema = new mongoose.Schema(
+      {
+        title: {
+          type: String,
+          required: [true, 'Title is required'],
+          trim: true
+        },
+        url: {
+          type: String,
+          required: [true, 'Image URL is required']
+        },
+        category: {
+          type: String,
+          default: 'Uncategorized'
+        },
+        description: {
+          type: String,
+          default: ''
+        },
+        alt: {
+          type: String,
+          default: ''
+        }
+      },
+      { timestamps: true }
+    );
+    
+    Gallery = mongoose.model("Gallery", gallerySchema);
+    console.log("📋 Created Gallery model inline");
+  }
+  
+  // GET /api/categories - Get all categories
+  router.get("/", async (req, res) => {
+    try {
+      const categories = await Category.find().sort({ name: 1 });
+      res.json(categories);
+    } catch (error) {
+      console.error("Get categories error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+  
+  // GET /api/categories/:id - Get single category
+  router.get("/:id", async (req, res) => {
+    try {
+      const category = await Category.findById(req.params.id);
+      if (!category) {
+        return res.status(404).json({ message: "Category not found" });
+      }
+      res.json(category);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+  
+  // POST /api/categories - Create category
+  router.post("/", async (req, res) => {
+    try {
+      console.log("Creating category:", req.body);
+      
+      const { name } = req.body;
+      
+      if (!name || !name.trim()) {
+        return res.status(400).json({ message: "Category name is required" });
+      }
+      
+      // Check if category already exists (case insensitive)
+      const existingCategory = await Category.findOne({ 
+        name: { $regex: new RegExp(`^${name.trim()}$`, 'i') } 
+      });
+      
+      if (existingCategory) {
+        return res.status(400).json({ message: "Category already exists" });
+      }
+      
+      const category = new Category({
+        name: name.trim()
+      });
+      
+      const savedCategory = await category.save();
+      console.log("Category saved:", savedCategory._id);
+      
+      res.status(201).json(savedCategory);
+    } catch (error) {
+      console.error("Create category error:", error);
+      res.status(400).json({ message: error.message });
+    }
+  });
+  
+  // PUT /api/categories/:id - Update category
+  router.put("/:id", async (req, res) => {
+    try {
+      console.log("Updating category:", req.params.id);
+      
+      const { name } = req.body;
+      
+      if (!name || !name.trim()) {
+        return res.status(400).json({ message: "Category name is required" });
+      }
+      
+      // Find the current category to get its old name
+      const currentCategory = await Category.findById(req.params.id);
+      if (!currentCategory) {
+        return res.status(404).json({ message: "Category not found" });
+      }
+      
+      const oldName = currentCategory.name;
+      const newName = name.trim();
+      
+      // Check if new name already exists (excluding current category)
+      const existingCategory = await Category.findOne({
+        _id: { $ne: req.params.id },
+        name: { $regex: new RegExp(`^${newName}$`, 'i') }
+      });
+      
+      if (existingCategory) {
+        return res.status(400).json({ message: "Category name already exists" });
+      }
+      
+      // Update the category name
+      const updatedCategory = await Category.findByIdAndUpdate(
+        req.params.id,
+        { name: newName },
+        { new: true, runValidators: true }
+      );
+      
+      if (!updatedCategory) {
+        return res.status(404).json({ message: "Category not found" });
+      }
+      
+      // Update all images that use the old category name
+      await Gallery.updateMany(
+        { category: oldName },
+        { $set: { category: newName } }
+      );
+      
+      console.log("Category updated:", updatedCategory._id);
+      console.log("Updated related images from", oldName, "to", newName);
+      
+      res.json(updatedCategory);
+    } catch (error) {
+      console.error("Update category error:", error);
+      res.status(400).json({ message: error.message });
+    }
+  });
+  
+  // DELETE /api/categories/:id - Delete category
+  router.delete("/:id", async (req, res) => {
+    try {
+      console.log("Deleting category:", req.params.id);
+      
+      // Find the category to get its name before deletion
+      const category = await Category.findById(req.params.id);
+      if (!category) {
+        return res.status(404).json({ message: "Category not found" });
+      }
+      
+      // Update all images with this category to "Uncategorized"
+      await Gallery.updateMany(
+        { category: category.name },
+        { $set: { category: "Uncategorized" } }
+      );
+      
+      console.log("Updated images from category", category.name, "to Uncategorized");
+      
+      // Now delete the category
+      await Category.findByIdAndDelete(req.params.id);
+      
+      console.log("Category deleted");
+      res.json({ 
+        message: "Category deleted successfully",
+        categoryName: category.name
+      });
+    } catch (error) {
+      console.error("Delete category error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+  
+  return router;
+}
+
+// ===========================
 // Load Routes Function
 // ===========================
 
@@ -589,6 +806,7 @@ async function loadRoutes() {
     products: { path: "./routes/productRoutes", mount: "/api/products" },
     services: { path: "./routes/serviceRoutes", mount: "/api/services" },
     gallery: { path: "./routes/galleryRoutes", mount: "/api/gallery" },
+    categories: { path: "./routes/categoryRoutes", mount: "/api/categories" }, // Added category routes
     clients: { path: "./routes/clientRoutes", mount: "/api/clients" },
     enquiries: { path: "./routes/enquiryRoutes", mount: "/api/enquiries" },
     brochure: { path: "./routes/brochureRoutes", mount: "/api/brochure" },
@@ -608,14 +826,23 @@ async function loadRoutes() {
       loadedRoutes[name] = route;
       console.log(`  ✅ ${name} route loaded`);
     } catch (error) {
-      if (error.code === "MODULE_NOT_FOUND" && name === "brochure") {
-        console.warn(`  ⚠️  ${name} route not found, creating inline...`);
-        loadedRoutes[name] = createBrochureRouter();
-        console.log(`  ✅ ${name} route created inline`);
-      } else if (error.code === "MODULE_NOT_FOUND") {
-        console.error(`  ❌ ${name} route not found: ${config.path}`);
-        // Skip this route instead of crashing
-        continue;
+      if (error.code === "MODULE_NOT_FOUND") {
+        // Create fallback routers for specific routes
+        if (name === "brochure") {
+          console.warn(`  ⚠️  ${name} route not found, creating inline...`);
+          loadedRoutes[name] = createBrochureRouter();
+          console.log(`  ✅ ${name} route created inline`);
+        } 
+        else if (name === "categories") {
+          console.warn(`  ⚠️  ${name} route not found, creating inline...`);
+          loadedRoutes[name] = createCategoryRouter();
+          console.log(`  ✅ ${name} route created inline`);
+        }
+        else {
+          console.error(`  ❌ ${name} route not found: ${config.path}`);
+          // Skip this route instead of crashing
+          continue;
+        }
       } else {
         console.error(`  ❌ ${name} route failed:`, error.message);
         throw error;
@@ -833,6 +1060,7 @@ const startServer = async () => {
       console.log("  ├── 📦 /api/products     - Products");
       console.log("  ├── 🛠️  /api/services     - Services");
       console.log("  ├── 🖼️  /api/gallery      - Gallery");
+      console.log("  ├── 🏷️  /api/categories   - Categories");  // Added for category management
       console.log("  ├── 👥 /api/clients      - Clients");
       console.log("  ├── 📧 /api/enquiries    - Enquiries");
       console.log("  ├── 📄 /api/brochure     - Brochures");

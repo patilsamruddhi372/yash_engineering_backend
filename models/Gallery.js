@@ -14,7 +14,24 @@ const gallerySchema = new mongoose.Schema({
     type: String,
     default: 'Uncategorized'
   },
+  description: {
+    type: String,
+    default: ''
+  },
   alt: {
+    type: String,
+    default: ''
+  },
+  // Adding new fields for better image management
+  fileName: {
+    type: String,
+    default: ''
+  },
+  fileSize: {
+    type: Number,
+    default: 0
+  },
+  fileType: {
     type: String,
     default: ''
   }
